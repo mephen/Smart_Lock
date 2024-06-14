@@ -48,11 +48,26 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+GPIO_TypeDef* R1_PORT = GPIOE;
+GPIO_TypeDef* R2_PORT = GPIOE;
+GPIO_TypeDef* R3_PORT = GPIOE;
+GPIO_TypeDef* R4_PORT = GPIOE;
+GPIO_TypeDef* C1_PORT = GPIOE;
+GPIO_TypeDef* C2_PORT = GPIOE;
+GPIO_TypeDef* C3_PORT = GPIOE;
+GPIO_TypeDef* C4_PORT = GPIOE;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define R1_PIN GPIO_PIN_7
+#define R2_PIN GPIO_PIN_8
+#define R3_PIN GPIO_PIN_9
+#define R4_PIN GPIO_PIN_10
+#define C1_PIN GPIO_PIN_11
+#define C2_PIN GPIO_PIN_12
+#define C3_PIN GPIO_PIN_13
+#define C4_PIN GPIO_PIN_14
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -87,6 +102,13 @@ TaskHandle_t xHandle_unlock_task = NULL;
   //registered card linked list
 card *list_start = NULL;
 card *list_end = NULL;
+
+char key;
+char enteredPin[5];
+uint8_t entered = 0;
+const char setPin[4] = {'1', '2', '3', '4'};
+uint8_t newPinSet = 0;
+QueueHandle_t keypadQueue;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -115,6 +137,52 @@ QueueHandle_t xQue1;
 /* USER CODE BEGIN 0 */
 //UART_HandleTypeDef UartHandle;
 /* Private function prototypes -----------------------------------------------*/
+char read_keypad(void)
+{
+    char keys[4][4] = {{'1', '2', '3', 'A'},
+                       {'4', '5', '6', 'B'},
+                       {'7', '8', '9', 'C'},
+                       {'*', '0', '#', 'D'}};
+
+    for (int i = 0; i < 4; i++)
+    {
+        // Set one column to LOW and others to HIGH
+        HAL_GPIO_WritePin(C1_PORT, C1_PIN, (i == 0) ? GPIO_PIN_RESET : GPIO_PIN_SET);
+        HAL_GPIO_WritePin(C2_PORT, C2_PIN, (i == 1) ? GPIO_PIN_RESET : GPIO_PIN_SET);
+        HAL_GPIO_WritePin(C3_PORT, C3_PIN, (i == 2) ? GPIO_PIN_RESET : GPIO_PIN_SET);
+        HAL_GPIO_WritePin(C4_PORT, C4_PIN, (i == 3) ? GPIO_PIN_RESET : GPIO_PIN_SET);
+//         printf("Row 1 Pin State: %d\n", HAL_GPIO_ReadPin(R1_PORT, R1_PIN));
+
+        // Check each row
+        if (HAL_GPIO_ReadPin(R1_PORT, R1_PIN) == GPIO_PIN_RESET) {
+            HAL_Delay(20); // Debounce delay
+            if (HAL_GPIO_ReadPin(R1_PORT, R1_PIN) == GPIO_PIN_RESET) { // Check again
+                return keys[i][0];
+            }
+        }
+        if (HAL_GPIO_ReadPin(R2_PORT, R2_PIN) == GPIO_PIN_RESET) {
+            HAL_Delay(20);
+            if (HAL_GPIO_ReadPin(R2_PORT, R2_PIN) == GPIO_PIN_RESET) {
+                return keys[i][1];
+            }
+        }
+        if (HAL_GPIO_ReadPin(R3_PORT, R3_PIN) == GPIO_PIN_RESET) {
+            HAL_Delay(20);
+            if (HAL_GPIO_ReadPin(R3_PORT, R3_PIN) == GPIO_PIN_RESET) {
+                return keys[i][2];
+            }
+        }
+        if (HAL_GPIO_ReadPin(R4_PORT, R4_PIN) == GPIO_PIN_RESET) {
+            HAL_Delay(20);
+            if (HAL_GPIO_ReadPin(R4_PORT, R4_PIN) == GPIO_PIN_RESET) {
+                return keys[i][3];
+            }
+        }
+    }
+
+//    printf("Key read: %c\n", key);
+    return '\0';
+}
 
 //search card in the linked list stored in the RAM of board
 uint8_t search_card_list_Global(uint8_t *target_cardVal)
@@ -591,6 +659,65 @@ uint8_t rc522_check(){
   return card_exist;
 }
 
+uint8_t keypad_check() {
+    printf("Entered keypad_check()\n");  
+    char enteredPin[5] = {0};
+    uint8_t entered = 0;
+    char key;
+    bool isButtonPressed = false;
+    bool startInput = false;  // Flag to indicate whether to start PIN input
+
+    HD44780_Clear();
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr("Ready");
+    HAL_Delay(20);
+
+    while (entered < 4) {
+        key = read_keypad();  // Read key input
+
+        if (key != '\0' && !isButtonPressed) {
+            printf("Entered key: %c\n", key);
+            if (!startInput) {
+                HD44780_Clear();  
+                HD44780_SetCursor(0, 0);
+                HD44780_PrintStr("Enter PIN:");
+                startInput = true;  // Start showing PIN input screen and accepting PIN input
+            }
+
+            if (key >= '0' && key <= '9' && entered < 4) {
+                strncat(enteredPin, &key, 1);
+                entered++;
+
+                HD44780_SetCursor(11 + entered - 1, 0);
+                HD44780_PrintStr("*");  // Print each '*' as it is entered
+                printf(key);
+            } else if (key == 'C' && entered > 0) {
+                enteredPin[--entered] = '\0';
+                HD44780_SetCursor(11 + entered, 0);
+                HD44780_PrintStr(" ");  // Clear the '*' from the display
+            }
+
+            isButtonPressed = true;  // Mark the button as pressed
+        } else if (key == '\0') {
+            isButtonPressed = false;  // Reset button press state
+        }
+    }
+
+    if (entered == 4) {
+        if (strncmp(enteredPin, setPin, 4) == 0) {
+            HD44780_Clear();
+            HD44780_SetCursor(0, 0);
+            HD44780_PrintStr("UNLOCKED");
+            return 1;  // PIN is correct
+        } else {
+            HD44780_SetCursor(0, 1);
+            HD44780_PrintStr("Wrong PIN. Try again.");
+            return 0;  // PIN is incorrect
+        }
+    }
+    return 0;  // Default return if less than 4 digits were entered
+}
+
 uint8_t bluetooth_check(){
 	uint8_t rx_data = 0;
 	if(HAL_UART_Receive(&huart2,&rx_data,1, 300) == HAL_OK){
@@ -604,48 +731,122 @@ uint8_t bluetooth_check(){
 	return 0;
 }
 
-uint8_t unlock_fn_AddCard(){
+// uint8_t unlock_fn_AddCard(){
+//   char add_Card_str[16] = "Add Card";
+//   HD44780_SetCursor(0,1);//move cursor to the first word of the second line
+//   HD44780_PrintStr(add_Card_str);
+//   uint32_t From_begin_time = HAL_GetTick();
+//   while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ //busy waiting 1000 ms, can't use vTaskDelay
+//     if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){//push button
+//       rc522_add_card();
+//       return 1;//do rc522_add_card
+//     }
+//   }
+//   return 0;//do nothing
+// }
+
+// uint8_t unlock_fn_DelCard(){
+//   char del_Card_str[16] = "Del Card";
+//   HD44780_SetCursor(0,1);
+//   HD44780_PrintStr(del_Card_str);
+//   uint32_t From_begin_time = HAL_GetTick();
+//   while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
+//     if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
+//       uint8_t del[5] = {211,113,208,2,112};
+//       rc522_delete_card(del);
+//       return 1;//do rc522_delete_card
+//     }
+//   }
+//   return 0;//do nothing
+// }
+
+// uint8_t unlock_fn_Lock(){
+//   char del_Card_str[16] = "LOCK!";
+//   HD44780_SetCursor(0,1);
+//   HD44780_PrintStr(del_Card_str);
+//   uint32_t From_begin_time = HAL_GetTick();
+//   while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
+//     if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
+//       vTaskResume(xHandle_lock_task);
+//       unlock_bee();
+//       return 1;//switch to lock_task
+//     }
+//   }
+//   return 0;//do nothing
+// }
+
+void unlock_fn_AddCard(){
+  HD44780_Init(2);//lcd init, should be called in "task"
+  HD44780_Clear();//clean screen
+  char unlock[16] = "UNLOCK!";
+  HD44780_PrintStr(unlock);
   char add_Card_str[16] = "Add Card";
   HD44780_SetCursor(0,1);//move cursor to the first word of the second line
   HD44780_PrintStr(add_Card_str);
   uint32_t From_begin_time = HAL_GetTick();
-  while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ //busy waiting 1000 ms, can't use vTaskDelay
+  while(HAL_GetTick() - From_begin_time < 3000/portTICK_RATE_MS){//wait 3s for push button 
     if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){//push button
       rc522_add_card();
-      return 1;//do rc522_add_card
     }
   }
-  return 0;//do nothing
 }
 
-uint8_t unlock_fn_DelCard(){
+void unlock_fn_DelCard(){
+  HD44780_Init(2);//lcd init, should be called in "task"
+  HD44780_Clear();//clean screen
+  char unlock[16] = "UNLOCK!";
+  HD44780_PrintStr(unlock);
   char del_Card_str[16] = "Del Card";
   HD44780_SetCursor(0,1);
   HD44780_PrintStr(del_Card_str);
   uint32_t From_begin_time = HAL_GetTick();
-  while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
-    if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
-      uint8_t del[5] = {211,113,208,2,112};
-      rc522_delete_card(del);
-      return 1;//do rc522_delete_card
+  while(HAL_GetTick() - From_begin_time < 3000/portTICK_RATE_MS){//wait 3s for push button
+    if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){//make sure doing delete card
+      while(1){
+        int count = 0;
+        card *current = list_start;
+        while(current != NULL){
+          HD44780_Clear();
+          char CARD[16] = "card ";
+          char card_number[1];
+          sprintf(card_number, "%d", count);
+          strcat(CARD, card_number);
+          HD44780_PrintStr(CARD);
+          uint32_t card_showTime = HAL_GetTick();
+          while(HAL_GetTick() - card_showTime < 1000/portTICK_RATE_MS){//delete selected card
+            if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
+              uint8_t del[5] = {current->data[0], current->data[1], current->data[2], current->data[3], current->data[4]};
+              rc522_delete_card(del);
+              HD44780_Clear();
+              char unlock_str[16] = "UNLOCK!";
+              HD44780_PrintStr(unlock_str);
+              return;
+            }
+          }
+          current = current->next;
+          count++;
+        }
+      }
     }
   }
-  return 0;//do nothing
 }
 
-uint8_t unlock_fn_Lock(){
-  char del_Card_str[16] = "LOCK!";
+void unlock_fn_Lock(){
+  HD44780_Init(2);//lcd init, should be called in "task"
+  HD44780_Clear();//clean screen
+  char unlock[16] = "UNLOCK!";
+  HD44780_PrintStr(unlock);
+  char del_Card_str[16] = "LOCK function";
   HD44780_SetCursor(0,1);
   HD44780_PrintStr(del_Card_str);
   uint32_t From_begin_time = HAL_GetTick();
-  while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
+  while(HAL_GetTick() - From_begin_time < 3000/portTICK_RATE_MS){//wait 3s for push button
     if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
+      HD44780_Clear();
       vTaskResume(xHandle_lock_task);
       unlock_bee();
-      return 1;//switch to lock_task
     }
   }
-  return 0;//do nothing
 }
 
 void lock_bee(){
@@ -672,29 +873,102 @@ void unlock_bee(){
   HAL_GPIO_WritePin(GPIOD, Bee_Pin, GPIO_PIN_RESET);
 }
 
+// void lock_task(void *pvParameters){
+//   HD44780_Init(2);//lcd init, should be called in "task"
+//   HD44780_Clear();//clean screen
+//   while(1){
+//     char lock_str[16] = "LOCK!";
+//     HAL_GPIO_TogglePin(GPIOD, LED_Green_Pin);
+//     HD44780_PrintStr(lock_str);
+//     uint8_t unlock = 0;
+//     unlock = rc522_check();//str_1
+//     if(unlock){
+//       vTaskSuspend(xHandle_lock_task);
+//       lock_bee();
+//     }
+
+//     uint32_t From_begin_time = HAL_GetTick();
+//     while(HAL_GetTick() - From_begin_time < 300/portTICK_RATE_MS){ //busy waiting 300 ms, can't use vTaskDelay
+//       //todo: password check
+//       // unlock = password_check();//str_2
+//       // if(unlock){
+//       //   vTaskSuspend(xHandle_lock_task);
+//       //   lock_bee();
+//       // }
+//       ;
+//     }
+
+//     // unlock = bluetooth_check();//wait 300ms for bluetooth signal
+//     // if(unlock){
+//     //   vTaskSuspend(xHandle_lock_task);
+//     //   lock_bee();
+//     // }
+
+//     HD44780_Clear();
+//   }
+// }
+
+// void unlock_task(void *pvParameters){
+//   HD44780_Init(2);//lcd init, should be called in "task"
+//   HD44780_Clear();//clean screen
+//   uint32_t timeout_count = HAL_GetTick();
+//   unlock_bee();
+//   while(1){
+//     char unlock_str[16] = "UNLOCK!";
+//     HD44780_PrintStr(unlock_str);
+//     uint8_t fn_execute = 0;
+//     //test
+//     //add card: 1000ms
+//     fn_execute = unlock_fn_AddCard();
+//     if(fn_execute){
+//       timeout_count = HAL_GetTick();//reset timeout_count
+//     }
+//     //del card: 1000ms
+//     fn_execute = unlock_fn_DelCard();
+//     if(fn_execute){
+//       timeout_count = HAL_GetTick();//reset timeout_count
+//     }
+//     //switch to lock_task
+//     fn_execute = unlock_fn_Lock();
+//     if(fn_execute){
+//       timeout_count = HAL_GetTick();//reset timeout_count
+//     }
+
+//     HD44780_Clear();
+//     if(HAL_GetTick() - timeout_count < 5000/portTICK_RATE_MS){//if 5s passed, switch to lock_task
+//       vTaskResume(xHandle_lock_task);//switch to lock_task
+//       timeout_count = HAL_GetTick();
+//     }
+//   }
+// }
+
+
 void lock_task(void *pvParameters){
   HD44780_Init(2);//lcd init, should be called in "task"
   HD44780_Clear();//clean screen
+  uint8_t keyPressed = 0;
   while(1){
     char lock_str[16] = "LOCK!";
     HAL_GPIO_TogglePin(GPIOD, LED_Green_Pin);
     HD44780_PrintStr(lock_str);
     uint8_t unlock = 0;
-    // unlock = rc522_check();//str_1
-    // if(unlock){
-    //   vTaskSuspend(xHandle_lock_task);
-    //   lock_bee();
-    // }
+    unlock = rc522_check();//str_1
+    if(unlock){
+      vTaskSuspend(xHandle_lock_task);
+      lock_bee();
+    }
 
     uint32_t From_begin_time = HAL_GetTick();
     while(HAL_GetTick() - From_begin_time < 300/portTICK_RATE_MS){ //busy waiting 300 ms, can't use vTaskDelay
-      //todo: password check
-      // unlock = password_check();//str_2
-      // if(unlock){
-      //   vTaskSuspend(xHandle_lock_task);
-      //   lock_bee();
-      // }
-      ;
+        char key = read_keypad();
+        if (key != '\0' && !keyPressed) {
+            keyPressed = 1;
+            if (keypad_check()) {
+                vTaskSuspend(xHandle_lock_task);
+            }
+        } else if (key == '\0' && keyPressed) {
+            keyPressed = 0; // Reset the flag when the key is released
+        }
     }
 
     // unlock = bluetooth_check();//wait 300ms for bluetooth signal
@@ -710,36 +984,26 @@ void lock_task(void *pvParameters){
 void unlock_task(void *pvParameters){
   HD44780_Init(2);//lcd init, should be called in "task"
   HD44780_Clear();//clean screen
-  uint32_t timeout_count = HAL_GetTick();
   unlock_bee();
   while(1){
     char unlock_str[16] = "UNLOCK!";
     HD44780_PrintStr(unlock_str);
     uint8_t fn_execute = 0;
-    //test
-    //add card: 1000ms
-    fn_execute = unlock_fn_AddCard();
-    if(fn_execute){
-      timeout_count = HAL_GetTick();//reset timeout_count
+    char key = read_keypad();
+    if (key == 'A'){
+      unlock_fn_AddCard();
     }
-    //del card: 1000ms
-    fn_execute = unlock_fn_DelCard();
-    if(fn_execute){
-      timeout_count = HAL_GetTick();//reset timeout_count
+    if (key == 'B'){
+      unlock_fn_DelCard();
     }
-    //switch to lock_task
-    fn_execute = unlock_fn_Lock();
-    if(fn_execute){
-      timeout_count = HAL_GetTick();//reset timeout_count
+    if (key == 'C'){
+      unlock_fn_Lock();
     }
 
     HD44780_Clear();
-    if(HAL_GetTick() - timeout_count < 5000/portTICK_RATE_MS){//if 5s passed, switch to lock_task
-      vTaskResume(xHandle_lock_task);//switch to lock_task
-      timeout_count = HAL_GetTick();
-    }
   }
 }
+
 
 void SD_RdWrTest(void) {
 	int i = 0;
@@ -1228,7 +1492,8 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4|C1_Pin|C2_Pin|C3_Pin
+                          |C4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, BOOT1_Pin|GPIO_PIN_11|GPIO_PIN_12, GPIO_PIN_RESET);
@@ -1237,8 +1502,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_8|Bee_Pin|LED_Green_Pin|LED_Orange_Pin
                           |LED_Red_Pin|LED_Blue_Pin|GPIO_PIN_7, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PE4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pins : PE4 C1_Pin C2_Pin C3_Pin
+                           C4_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|C1_Pin|C2_Pin|C3_Pin
+                          |C4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1256,6 +1523,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : R1_Pin R2_Pin R3_Pin R4_Pin */
+  GPIO_InitStruct.Pin = R1_Pin|R2_Pin|R3_Pin|R4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PD8 Bee_Pin LED_Green_Pin LED_Orange_Pin
                            LED_Red_Pin LED_Blue_Pin PD7 */
