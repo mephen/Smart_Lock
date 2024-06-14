@@ -604,6 +604,48 @@ uint8_t bluetooth_check(){
 	return 0;
 }
 
+uint8_t unlock_fn_AddCard(){
+  char add_Card_str[16] = "Add Card";
+  HD44780_SetCursor(0,1);//move cursor to the first word of the second line
+  HD44780_PrintStr(add_Card_str);
+  uint32_t From_begin_time = HAL_GetTick();
+  while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ //busy waiting 1000 ms, can't use vTaskDelay
+    if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){//push button
+      rc522_add_card();
+      return 1;//do rc522_add_card
+    }
+  }
+  return 0;//do nothing
+}
+
+uint8_t unlock_fn_DelCard(){
+  char del_Card_str[16] = "Del Card";
+  HD44780_SetCursor(0,1);
+  HD44780_PrintStr(del_Card_str);
+  uint32_t From_begin_time = HAL_GetTick();
+  while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
+    if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
+      uint8_t del[5] = {211,113,208,2,112};
+      rc522_delete_card(del);
+      return 1;//do rc522_delete_card
+    }
+  }
+  return 0;//do nothing
+}
+
+uint8_t unlock_fn_Lock(){
+  char del_Card_str[16] = "LOCK!";
+  HD44780_SetCursor(0,1);
+  HD44780_PrintStr(del_Card_str);
+  uint32_t From_begin_time = HAL_GetTick();
+  while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
+    if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
+      vTaskResume(xHandle_lock_task);
+      return 1;//switch to lock_task
+    }
+  }
+  return 0;//do nothing
+}
 
 void lock_task(void *pvParameters){
   HD44780_Init(2);//lcd init, should be called in "task"
@@ -640,36 +682,27 @@ void lock_task(void *pvParameters){
 void unlock_task(void *pvParameters){
   HD44780_Init(2);//lcd init, should be called in "task"
   HD44780_Clear();//clean screen
+  uint32_t timeout_count = HAL_GetTick();
   while(1){
     char unlock_str[16] = "UNLOCK!";
     HD44780_PrintStr(unlock_str);
+    uint8_t fn_execute = 0;
     //test
-    //add card: 300ms
-    char add_Card_str[16] = "Add Card";
-    HD44780_SetCursor(0,1);//move cursor to the first word of the second line
-    HD44780_PrintStr(add_Card_str);
-    uint32_t From_begin_time = HAL_GetTick();
-    while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ //busy waiting 300 ms, can't use vTaskDelay
-      if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){//push button
-        // rc522_add_card();
-        vTaskResume(xHandle_lock_task);
-      }
-    }
-    //del card: 300ms
-    char del_Card_str[16] = "Del Card";
-    HD44780_SetCursor(0,1);
-    HD44780_PrintStr(del_Card_str);
-    From_begin_time = HAL_GetTick();
-    while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
-      if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
-        uint8_t del[5] = {211,113,208,2,112};
-        // rc522_delete_card(del);
-        vTaskResume(xHandle_lock_task);
-      }
-    }
-
+    //add card: 1000ms
+    fn_execute = unlock_fn_AddCard();
+    if(fn_execute){timeout_count = HAL_GetTick();}//reset timeout_count
+    //del card: 1000ms
+    fn_execute = unlock_fn_DelCard();
+    if(fn_execute){timeout_count = HAL_GetTick();}
+    //switch to lock_task
+    fn_execute = unlock_fn_Lock();
+    if(fn_execute){timeout_count = HAL_GetTick();}
 
     HD44780_Clear();
+    if(HAL_GetTick() - timeout_count < 5000/portTICK_RATE_MS){//if 5s passed, switch to lock_task
+      vTaskResume(xHandle_lock_task);//switch to lock_task
+      timeout_count = HAL_GetTick();
+    }
   }
 }
 
