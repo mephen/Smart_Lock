@@ -93,7 +93,7 @@ card *list_end = NULL;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_SPI1_Init(void);
+void MX_SPI1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_I2S3_Init(void);
 static void MX_USART2_UART_Init(void);
@@ -641,10 +641,35 @@ uint8_t unlock_fn_Lock(){
   while(HAL_GetTick() - From_begin_time < 1000/portTICK_RATE_MS){ 
     if(debounce(HAL_GPIO_ReadPin(btn_blue_GPIO_Port, GPIO_PIN_0))){
       vTaskResume(xHandle_lock_task);
+      unlock_bee();
       return 1;//switch to lock_task
     }
   }
   return 0;//do nothing
+}
+
+void lock_bee(){
+  for (size_t i = 0; i < 2; i++)
+  {
+    uint32_t bee_time = HAL_GetTick();
+    HAL_GPIO_WritePin(GPIOD, Bee_Pin, GPIO_PIN_SET);
+    while(HAL_GetTick() - bee_time < 300/portTICK_RATE_MS){
+      ;
+    }
+    HAL_GPIO_WritePin(GPIOD, Bee_Pin, GPIO_PIN_RESET);
+    while(HAL_GetTick() - bee_time < 600/portTICK_RATE_MS){
+      ;
+    }
+  }
+}
+
+void unlock_bee(){
+  uint32_t bee_time = HAL_GetTick();
+  HAL_GPIO_WritePin(GPIOD, Bee_Pin, GPIO_PIN_SET);
+  while(HAL_GetTick() - bee_time < 300/portTICK_RATE_MS){
+    ;
+  }
+  HAL_GPIO_WritePin(GPIOD, Bee_Pin, GPIO_PIN_RESET);
 }
 
 void lock_task(void *pvParameters){
@@ -658,6 +683,7 @@ void lock_task(void *pvParameters){
     // unlock = rc522_check();//str_1
     // if(unlock){
     //   vTaskSuspend(xHandle_lock_task);
+    //   lock_bee();
     // }
 
     uint32_t From_begin_time = HAL_GetTick();
@@ -666,6 +692,7 @@ void lock_task(void *pvParameters){
       // unlock = password_check();//str_2
       // if(unlock){
       //   vTaskSuspend(xHandle_lock_task);
+      //   lock_bee();
       // }
       ;
     }
@@ -673,6 +700,7 @@ void lock_task(void *pvParameters){
     // unlock = bluetooth_check();//wait 300ms for bluetooth signal
     // if(unlock){
     //   vTaskSuspend(xHandle_lock_task);
+    //   lock_bee();
     // }
 
     HD44780_Clear();
@@ -683,6 +711,7 @@ void unlock_task(void *pvParameters){
   HD44780_Init(2);//lcd init, should be called in "task"
   HD44780_Clear();//clean screen
   uint32_t timeout_count = HAL_GetTick();
+  unlock_bee();
   while(1){
     char unlock_str[16] = "UNLOCK!";
     HD44780_PrintStr(unlock_str);
@@ -690,13 +719,19 @@ void unlock_task(void *pvParameters){
     //test
     //add card: 1000ms
     fn_execute = unlock_fn_AddCard();
-    if(fn_execute){timeout_count = HAL_GetTick();}//reset timeout_count
+    if(fn_execute){
+      timeout_count = HAL_GetTick();//reset timeout_count
+    }
     //del card: 1000ms
     fn_execute = unlock_fn_DelCard();
-    if(fn_execute){timeout_count = HAL_GetTick();}
+    if(fn_execute){
+      timeout_count = HAL_GetTick();//reset timeout_count
+    }
     //switch to lock_task
     fn_execute = unlock_fn_Lock();
-    if(fn_execute){timeout_count = HAL_GetTick();}
+    if(fn_execute){
+      timeout_count = HAL_GetTick();//reset timeout_count
+    }
 
     HD44780_Clear();
     if(HAL_GetTick() - timeout_count < 5000/portTICK_RATE_MS){//if 5s passed, switch to lock_task
@@ -1002,7 +1037,7 @@ static void MX_I2S3_Init(void)
   * @param None
   * @retval None
   */
-static void MX_SPI1_Init(void)
+void MX_SPI1_Init(void)
 {
 
   /* USER CODE BEGIN SPI1_Init 0 */
@@ -1199,8 +1234,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, BOOT1_Pin|GPIO_PIN_11|GPIO_PIN_12, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_8|LED_Green_Pin|LED_Orange_Pin|LED_Red_Pin
-                          |LED_Blue_Pin|GPIO_PIN_7, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_8|Bee_Pin|LED_Green_Pin|LED_Orange_Pin
+                          |LED_Red_Pin|LED_Blue_Pin|GPIO_PIN_7, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PE4 */
   GPIO_InitStruct.Pin = GPIO_PIN_4;
@@ -1222,10 +1257,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD8 LED_Green_Pin LED_Orange_Pin LED_Red_Pin
-                           LED_Blue_Pin PD7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_8|LED_Green_Pin|LED_Orange_Pin|LED_Red_Pin
-                          |LED_Blue_Pin|GPIO_PIN_7;
+  /*Configure GPIO pins : PD8 Bee_Pin LED_Green_Pin LED_Orange_Pin
+                           LED_Red_Pin LED_Blue_Pin PD7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|Bee_Pin|LED_Green_Pin|LED_Orange_Pin
+                          |LED_Red_Pin|LED_Blue_Pin|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

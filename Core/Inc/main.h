@@ -67,6 +67,8 @@ void Error_Handler(void);
 #define btn_blue_GPIO_Port GPIOA
 #define BOOT1_Pin GPIO_PIN_2
 #define BOOT1_GPIO_Port GPIOB
+#define Bee_Pin GPIO_PIN_11
+#define Bee_GPIO_Port GPIOD
 #define LED_Green_Pin GPIO_PIN_12
 #define LED_Green_GPIO_Port GPIOD
 #define LED_Orange_Pin GPIO_PIN_13
