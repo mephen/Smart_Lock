@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "fatfs.h": "c",
+        "mmc_sd.h": "c",
+        "stdio.h": "c",
+        "liquidcrystal_i2c.h": "c"
+    }
+}
