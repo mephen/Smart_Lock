@@ -89,7 +89,9 @@ SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim2;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 uint8_t status;
@@ -122,6 +124,8 @@ static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_USART3_UART_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 //extern ApplicationTypeDef Appli_state;
 extern AUDIO_PLAYBACK_StateTypeDef AudioState;
@@ -965,17 +969,20 @@ void lock_task(void *pvParameters){
             keyPressed = 1;
             if (keypad_check()) {
                 vTaskSuspend(xHandle_lock_task);
+                lock_bee();
             }
         } else if (key == '\0' && keyPressed) {
             keyPressed = 0; // Reset the flag when the key is released
         }
     }
 
-    // unlock = bluetooth_check();//wait 300ms for bluetooth signal
-    // if(unlock){
-    //   vTaskSuspend(xHandle_lock_task);
-    //   lock_bee();
-    // }
+    unlock = bluetooth_check();//wait 300ms for bluetooth signal
+    if(unlock){
+    	// char* device = "BT";
+    	// sendLogToServer(device);
+    	vTaskSuspend(xHandle_lock_task);
+    	lock_bee();
+    }
 
     HD44780_Clear();
   }
@@ -998,6 +1005,7 @@ void unlock_task(void *pvParameters){
     }
     if (key == 'C'){
       unlock_fn_Lock();
+
     }
 
     HD44780_Clear();
@@ -1020,6 +1028,88 @@ void SD_RdWrTest(void) {
 	printf("# SD Card Read & Write Test %s!\r\n",
 			memcmp(bufr, bufw, sizeof(bufr)) == 0 ? "Successfully" : "Failed");
 }
+
+void sendCommand(UART_HandleTypeDef *huart, char* cmd) {
+    HAL_UART_Transmit(huart, (uint8_t*)cmd, strlen(cmd), 500);
+}
+
+void receiveResponse(UART_HandleTypeDef *huart, uint8_t *buffer, uint16_t bufferSize) {
+    HAL_UART_Receive(huart, buffer, bufferSize, 500);
+}
+
+void sendLogToServer(const char* device) {
+    char httpRequest[256];
+    char httpCmd[64];
+    char rxBuffer[256];
+
+    memset(rxBuffer,'\0',sizeof(rxBuffer));
+    sendCommand(&huart1, "AT+CIPSTART=\"TCP\",\"192.168.50.94\",8000\r\n");
+    // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+  
+    // Create the JSON payload
+    snprintf(httpRequest, sizeof(httpRequest),
+             "POST /log HTTP/1.1\r\n"
+             "Host: 192.168.1.115:8000\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %d\r\n"
+             "\r\n"
+             "{\"device\":\"%s\"}",
+             strlen(device) + 13, device);
+ 
+    // Calculate the length of the HTTP request
+    int httpRequestLength = strlen(httpRequest);
+ 
+    // Create the AT+CIPSEND command with the correct length
+    snprintf(httpCmd, sizeof(httpCmd), "AT+CIPSEND=%d\r\n", httpRequestLength);
+ 
+    // Clear the receive buffer
+    memset(rxBuffer, '\0', sizeof(rxBuffer));
+ 
+    // Send the AT+CIPSEND command
+    sendCommand(&huart1, httpCmd);
+ 
+    // Receive the response (wait for ">")
+    // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+ 
+    // Check if the response contains ">"
+    if (strstr(rxBuffer, ">") != NULL) {
+        // Clear the receive buffer
+        memset(rxBuffer, '\0', sizeof(rxBuffer));
+ 
+        // Send the actual HTTP request
+        sendCommand(&huart1, httpRequest);
+ 
+        // Receive the response
+        // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+    }
+
+    memset(rxBuffer, '\0', sizeof(rxBuffer));
+    sendCommand(&huart1, "AT+CIPCLOSE\r\n");
+    // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+}
+
+void vEsp8266Init(){
+      char rxBuffer[512];
+ 
+      memset(rxBuffer,'\0',sizeof(rxBuffer));
+      sendCommand(&huart2, "AT\r\n");
+      // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+ 
+      memset(rxBuffer,'\0',sizeof(rxBuffer));
+      sendCommand(&huart2, "AT+CWMODE=1\r\n");
+      // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+ 
+      memset(rxBuffer,'\0',sizeof(rxBuffer));
+      sendCommand(&huart2, "AT+CWJAP=\"92902\",\"00092902\"\r\n");
+      // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+ 
+ 
+      memset(rxBuffer,'\0',sizeof(rxBuffer));
+      sendCommand(&huart2, "AT+CIPMUX=0\r\n");
+      // receiveResponse(&huart1, rxBuffer, sizeof(rxBuffer));
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -1058,7 +1148,10 @@ int main(void)
   MX_ADC1_Init();
   MX_SPI2_Init();
   MX_TIM2_Init();
+  MX_USART3_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  // vEsp8266Init(); //WiFi init
   MFRC522_Init();//card reader init
   card *default_card = (card *)malloc(sizeof(card));
   default_card->next = NULL;
@@ -1072,6 +1165,8 @@ int main(void)
 
 	CardSize = SD_GetSectorCount();
 	CardSize = CardSize * SD_SECTOR_SIZE / 1024 / 1024;
+
+
 
 	// printf("# SD Card Type:0x%02X\r\n", SD_Type);
 	// printf("# SD Card Size:%luMB\r\n", (uint32_t) CardSize);
@@ -1116,7 +1211,8 @@ int main(void)
 
 	while (1) {
     /* USER CODE END WHILE */
-
+    HAL_GPIO_TogglePin(GPIOD, LED_Green_Pin);
+    HAL_Delay(300);
     /* USER CODE BEGIN 3 */
 	}
   /* USER CODE END 3 */
@@ -1422,6 +1518,39 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -1451,6 +1580,39 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
 
 }
 
